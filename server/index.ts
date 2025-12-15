@@ -136,16 +136,10 @@ if (isVercel) {
     });
 
     if (isVercel) {
-      // En Vercel (serverless): servir archivos estáticos y manejar SPA routing
-      // Express maneja tanto rutas API como archivos estáticos
-      // No hacer listen() - Vercel maneja el servidor automáticamente
-      try {
-        serveStatic(app);
-      } catch (error) {
-        console.error("⚠️ Error setting up static files in Vercel:", error);
-        // Si falla, al menos las rutas API funcionarán
-        // Los archivos estáticos serán manejados por Vercel automáticamente si están en el output directory
-      }
+      // En Vercel (serverless): solo manejar rutas API
+      // Los archivos estáticos son servidos automáticamente por Vercel desde dist/public
+      // El SPA routing es manejado por vercel.json (rewrite a /index.html)
+      // No necesitamos servir archivos estáticos aquí
     } else if (app.get("env") === "development") {
       // Desarrollo local: usar Vite HMR y hacer listen()
       // Importar Vite dinámicamente solo en desarrollo
