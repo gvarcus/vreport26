@@ -41,8 +41,9 @@ export function serveStatic(app: Express) {
   // IMPORTANTE: express.static debe ejecutarse ANTES del catch-all
   // y debe configurar los tipos MIME correctamente
   
-  // Middleware para servir archivos estáticos (solo para rutas no-API)
-  const staticMiddleware = express.static(distPath, {
+  // Servir archivos estáticos con Express
+  // IMPORTANTE: Esto debe ejecutarse ANTES del catch-all para index.html
+  app.use(express.static(distPath, {
     setHeaders: (res, filePath) => {
       const ext = path.extname(filePath);
       if (ext === '.js') {
@@ -59,34 +60,10 @@ export function serveStatic(app: Express) {
     },
     // Si el archivo no existe, continuar al siguiente middleware (catch-all)
     fallthrough: true
-  });
-  
-  app.use((req, res, next) => {
-    // Saltar archivos estáticos para rutas API
-    if (req.path.startsWith("/api")) {
-      return next();
-    }
-    
-    // Verificar si el archivo existe antes de intentar servirlo
-    const ext = path.extname(req.path);
-    if (ext) {
-      const requestedFile = path.resolve(distPath, req.path.slice(1));
-      if (fs.existsSync(requestedFile)) {
-        // El archivo existe, servirlo con express.static
-        return staticMiddleware(req, res, next);
-      } else {
-        // El archivo no existe, continuar al catch-all
-        console.log(`File not found: ${requestedFile} (requested: ${req.path})`);
-        return next();
-      }
-    }
-    
-    // Sin extensión, ejecutar express.static (puede servir index.html si está configurado)
-    staticMiddleware(req, res, next);
-  });
+  }));
 
   // fall through to index.html if the file doesn't exist (SPA routing)
-  // Solo para rutas que NO sean API y que NO sean archivos estáticos existentes
+  // Solo para rutas que NO sean API
   app.use((req, res, next) => {
     // Saltar si es una ruta API
     if (req.path.startsWith("/api")) {
@@ -99,13 +76,17 @@ export function serveStatic(app: Express) {
       // Si tiene extensión, verificar si el archivo existe
       const requestedFile = path.resolve(distPath, req.path.slice(1)); // Remover leading /
       if (fs.existsSync(requestedFile)) {
-        // El archivo existe pero express.static no lo sirvió
+        // El archivo existe pero express.static no lo sirvió (fallthrough)
         // Intentar servirlo manualmente con el tipo MIME correcto
         const contentType = ext === '.js' ? 'application/javascript; charset=utf-8' :
                             ext === '.css' ? 'text/css; charset=utf-8' :
                             ext === '.json' ? 'application/json; charset=utf-8' :
                             ext === '.ico' ? 'image/x-icon' :
-                            ext === '.png' ? 'image/png' : 'application/octet-stream';
+                            ext === '.png' ? 'image/png' :
+                            ext === '.jpg' || ext === '.jpeg' ? 'image/jpeg' :
+                            ext === '.gif' ? 'image/gif' :
+                            ext === '.svg' ? 'image/svg+xml' :
+                            'application/octet-stream';
         
         return res.type(contentType).sendFile(requestedFile, (err) => {
           if (err) {
