@@ -1,7 +1,7 @@
 import type { Express, Request, Response } from "express";
 import { createServer, type Server } from "http";
-import { storage } from "./storage";
-import { OdooService } from "./lib/odooService";
+import { storage } from "./storage.js";
+import { OdooService } from "./lib/odooService.js";
 import { authenticate } from "./middleware/auth.js";
 import { loginRateLimiter, reportsRateLimiter, generalRateLimiter } from "./middleware/rateLimit.js";
 import { validateLogin, validateDateRange, validatePagination, combineValidators } from "./middleware/validation.js";
