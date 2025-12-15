@@ -78,9 +78,45 @@ app.use((req, res, next) => {
 // Detectar si estamos en Vercel (serverless)
 const isVercel = process.env.VERCEL === "1";
 
-// Inicializar la aplicación
+// Manejar errores no capturados y rechazos de promesas
+if (isVercel) {
+  process.on('uncaughtException', (error) => {
+    console.error('❌ Uncaught Exception:', error);
+    // No crashear en Vercel, solo loggear
+  });
+
+  process.on('unhandledRejection', (reason, promise) => {
+    console.error('❌ Unhandled Rejection at:', promise, 'reason:', reason);
+    // No crashear en Vercel, solo loggear
+  });
+}
+
+// Inicializar la aplicación con mejor manejo de errores
 (async () => {
   try {
+    // Verificar variables de entorno críticas antes de continuar
+    const requiredEnvVars = ['JWT_SECRET', 'ODOO_URL', 'ODOO_DB', 'DB_HOST', 'DB_PORT', 'DB_NAME', 'DB_USER', 'DB_PASSWORD'];
+    const missingVars = requiredEnvVars.filter(varName => !process.env[varName]);
+    
+    if (missingVars.length > 0) {
+      const errorMsg = `Missing required environment variables: ${missingVars.join(', ')}`;
+      console.error(`❌ ${errorMsg}`);
+      if (isVercel) {
+        // En Vercel, configurar una ruta de error en lugar de crashear
+        app.use("*", (_req, res) => {
+          res.status(500).json({
+            error: "Configuration error",
+            message: errorMsg,
+            missingVariables: missingVars,
+            hint: "Please configure all required environment variables in Vercel Dashboard"
+          });
+        });
+        return; // No continuar con la inicialización
+      } else {
+        throw new Error(errorMsg);
+      }
+    }
+
     const server = await registerRoutes(app);
 
     app.use((err: any, _req: Request, res: Response, _next: NextFunction) => {
