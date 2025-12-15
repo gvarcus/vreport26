@@ -75,6 +75,9 @@ app.use((req, res, next) => {
   next();
 });
 
+// Detectar si estamos en Vercel (serverless)
+const isVercel = process.env.VERCEL === "1";
+
 (async () => {
   const server = await registerRoutes(app);
 
@@ -86,19 +89,27 @@ app.use((req, res, next) => {
     throw err;
   });
 
-  // importantly only setup vite in development and after
-  // setting up all the other routes so the catch-all route
-  // doesn't interfere with the other routes
-  if (app.get("env") === "development") {
-    await setupVite(app, server);
-  } else {
+  if (isVercel) {
+    // En Vercel (serverless): solo servir archivos estáticos, no hacer listen()
+    // Vercel maneja el servidor automáticamente
     serveStatic(app);
+  } else if (app.get("env") === "development") {
+    // Desarrollo local: usar Vite HMR y hacer listen()
+    await setupVite(app, server);
+    const port = process.env.PORT ? parseInt(process.env.PORT) : 3001;
+    server.listen(port, "0.0.0.0", () => {
+      log(`serving on port ${port}`);
+    });
+  } else {
+    // Producción local: servir estáticos y hacer listen()
+    serveStatic(app);
+    const port = process.env.PORT ? parseInt(process.env.PORT) : 3001;
+    server.listen(port, "0.0.0.0", () => {
+      log(`serving on port ${port}`);
+    });
   }
-
-  // Serve the app on port 3001 for macOS compatibility
-  // this serves both the API and the client.
-  const port = process.env.PORT ? parseInt(process.env.PORT) : 3001;
-  server.listen(port, "0.0.0.0", () => {
-    log(`serving on port ${port}`);
-  });
 })();
+
+// Exportar para Vercel (solo se usa en Vercel, no afecta desarrollo local)
+// Vercel requiere este export default para funcionar como serverless function
+export default app;
