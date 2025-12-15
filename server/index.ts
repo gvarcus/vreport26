@@ -2,35 +2,42 @@ import "dotenv/config";
 import express, { type Request, Response, NextFunction } from "express";
 import helmet from "helmet";
 import { registerRoutes } from "./routes.js";
-import { setupVite, serveStatic, log } from "./vite.js";
+
+// Detectar si estamos en Vercel (serverless) o desarrollo
+const isVercel = process.env.VERCEL === "1";
+const isDevelopment = process.env.NODE_ENV === "development";
+
+// En producción/Vercel, usar implementación simple sin Vite
+// En desarrollo, importar Vite dinámicamente solo cuando se necesite
+import { serveStatic, log } from "./static.js";
 
 const app = express();
 
 // Configure Helmet for security headers
 // Note: In development, we need to allow unsafe-inline for Vite HMR
 // In production, this should be stricter with nonces
-const isDevelopment = app.get("env") === "development";
+const isDevelopmentEnv = app.get("env") === "development";
 
 app.use(
   helmet({
     contentSecurityPolicy: {
       directives: {
         defaultSrc: ["'self'"],
-        scriptSrc: isDevelopment
+        scriptSrc: isDevelopmentEnv
           ? ["'self'", "'unsafe-inline'", "'unsafe-eval'", "http://localhost:3001"] // Vite HMR needs unsafe-eval in dev
           : ["'self'"], // Production: use nonces for inline scripts
-        styleSrc: isDevelopment
+        styleSrc: isDevelopmentEnv
           ? ["'self'", "'unsafe-inline'", "https://fonts.googleapis.com"]
           : ["'self'", "https://fonts.googleapis.com"], // Production: move inline styles to CSS files
-        styleSrcAttr: isDevelopment ? ["'unsafe-inline'"] : [], // Production: avoid inline styles
+        styleSrcAttr: isDevelopmentEnv ? ["'unsafe-inline'"] : [], // Production: avoid inline styles
         fontSrc: ["'self'", "https://fonts.gstatic.com"],
-        connectSrc: ["'self'", isDevelopment ? "http://localhost:3001" : ""].filter(Boolean),
+        connectSrc: ["'self'", isDevelopmentEnv ? "http://localhost:3001" : ""].filter(Boolean),
         imgSrc: ["'self'", "data:", "https:"],
         objectSrc: ["'none'"],
         baseUri: ["'self'"],
         frameAncestors: ["'none'"],
         formAction: ["'self'"],
-        upgradeInsecureRequests: !isDevelopment ? [] : null, // Only in production
+        upgradeInsecureRequests: !isDevelopmentEnv ? [] : null, // Only in production
       },
     },
     crossOriginEmbedderPolicy: false, // Disable for Vite compatibility
@@ -75,8 +82,6 @@ app.use((req, res, next) => {
   next();
 });
 
-// Detectar si estamos en Vercel (serverless)
-const isVercel = process.env.VERCEL === "1";
 
 // Manejar errores no capturados y rechazos de promesas
 if (isVercel) {
@@ -143,7 +148,9 @@ if (isVercel) {
       }
     } else if (app.get("env") === "development") {
       // Desarrollo local: usar Vite HMR y hacer listen()
-      await setupVite(app, server);
+      // Importar Vite dinámicamente solo en desarrollo
+      const { setupVite: setupViteDev } = await import("./vite.js");
+      await setupViteDev(app, server);
       const port = process.env.PORT ? parseInt(process.env.PORT) : 3001;
       server.listen(port, "0.0.0.0", () => {
         log(`serving on port ${port}`);
