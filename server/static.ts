@@ -66,7 +66,22 @@ export function serveStatic(app: Express) {
     if (req.path.startsWith("/api")) {
       return next();
     }
-    // Ejecutar express.static para archivos estáticos
+    
+    // Verificar si el archivo existe antes de intentar servirlo
+    const ext = path.extname(req.path);
+    if (ext) {
+      const requestedFile = path.resolve(distPath, req.path.slice(1));
+      if (fs.existsSync(requestedFile)) {
+        // El archivo existe, servirlo con express.static
+        return staticMiddleware(req, res, next);
+      } else {
+        // El archivo no existe, continuar al catch-all
+        console.log(`File not found: ${requestedFile} (requested: ${req.path})`);
+        return next();
+      }
+    }
+    
+    // Sin extensión, ejecutar express.static (puede servir index.html si está configurado)
     staticMiddleware(req, res, next);
   });
 
