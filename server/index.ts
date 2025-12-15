@@ -90,9 +90,9 @@ const isVercel = process.env.VERCEL === "1";
   });
 
   if (isVercel) {
-    // En Vercel (serverless): solo servir archivos estáticos, no hacer listen()
-    // Vercel maneja el servidor automáticamente
-    serveStatic(app);
+    // En Vercel (serverless): Vercel sirve archivos estáticos automáticamente
+    // Express solo maneja rutas API, no necesita servir estáticos
+    // No hacer listen() - Vercel maneja el servidor automáticamente
   } else if (app.get("env") === "development") {
     // Desarrollo local: usar Vite HMR y hacer listen()
     await setupVite(app, server);
