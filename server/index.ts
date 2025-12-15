@@ -78,38 +78,70 @@ app.use((req, res, next) => {
 // Detectar si estamos en Vercel (serverless)
 const isVercel = process.env.VERCEL === "1";
 
+// Inicializar la aplicación
 (async () => {
-  const server = await registerRoutes(app);
+  try {
+    const server = await registerRoutes(app);
 
-  app.use((err: any, _req: Request, res: Response, _next: NextFunction) => {
-    const status = err.status || err.statusCode || 500;
-    const message = err.message || "Internal Server Error";
+    app.use((err: any, _req: Request, res: Response, _next: NextFunction) => {
+      const status = err.status || err.statusCode || 500;
+      const message = err.message || "Internal Server Error";
 
-    res.status(status).json({ message });
-    throw err;
-  });
-
-  if (isVercel) {
-    // En Vercel (serverless): servir archivos estáticos y manejar SPA routing
-    // Express maneja tanto rutas API como archivos estáticos
-    // No hacer listen() - Vercel maneja el servidor automáticamente
-    serveStatic(app);
-  } else if (app.get("env") === "development") {
-    // Desarrollo local: usar Vite HMR y hacer listen()
-    await setupVite(app, server);
-    const port = process.env.PORT ? parseInt(process.env.PORT) : 3001;
-    server.listen(port, "0.0.0.0", () => {
-      log(`serving on port ${port}`);
+      res.status(status).json({ message });
+      // No lanzar error en serverless para evitar crashes
+      if (!isVercel) {
+        throw err;
+      }
     });
-  } else {
-    // Producción local: servir estáticos y hacer listen()
-    serveStatic(app);
-    const port = process.env.PORT ? parseInt(process.env.PORT) : 3001;
-    server.listen(port, "0.0.0.0", () => {
-      log(`serving on port ${port}`);
-    });
+
+    if (isVercel) {
+      // En Vercel (serverless): servir archivos estáticos y manejar SPA routing
+      // Express maneja tanto rutas API como archivos estáticos
+      // No hacer listen() - Vercel maneja el servidor automáticamente
+      try {
+        serveStatic(app);
+      } catch (error) {
+        console.error("⚠️ Error setting up static files in Vercel:", error);
+        // Si falla, al menos las rutas API funcionarán
+        // Los archivos estáticos serán manejados por Vercel automáticamente si están en el output directory
+      }
+    } else if (app.get("env") === "development") {
+      // Desarrollo local: usar Vite HMR y hacer listen()
+      await setupVite(app, server);
+      const port = process.env.PORT ? parseInt(process.env.PORT) : 3001;
+      server.listen(port, "0.0.0.0", () => {
+        log(`serving on port ${port}`);
+      });
+    } else {
+      // Producción local: servir estáticos y hacer listen()
+      serveStatic(app);
+      const port = process.env.PORT ? parseInt(process.env.PORT) : 3001;
+      server.listen(port, "0.0.0.0", () => {
+        log(`serving on port ${port}`);
+      });
+    }
+  } catch (error) {
+    console.error("❌ Error initializing app:", error);
+    // En Vercel, asegurar que la app siempre responda incluso si hay errores
+    if (isVercel) {
+      app.use("*", (_req, res) => {
+        res.status(500).json({
+          error: "Initialization error",
+          message: error instanceof Error ? error.message : "Unknown error",
+          details: process.env.NODE_ENV === "development" ? String(error) : undefined
+        });
+      });
+    } else {
+      // En desarrollo/producción local, fallar completamente
+      throw error;
+    }
   }
-})();
+})().catch((error) => {
+  console.error("❌ Fatal error during initialization:", error);
+  if (!isVercel) {
+    process.exit(1);
+  }
+});
 
 // Exportar para Vercel (solo se usa en Vercel, no afecta desarrollo local)
 // Vercel requiere este export default para funcionar como serverless function
