@@ -438,6 +438,10 @@ export class OdooService {
       const testUser = process.env.TEST_USER;
       const testPassword = process.env.TEST_PASSWORD;
 
+      if (!testUser || !testPassword) {
+        throw new Error('TEST_USER and TEST_PASSWORD must be configured in environment variables');
+      }
+
       console.log(`🧪 Probando conexión con Odoo: ${this.ODOO_URL}`);
       console.log(`📊 Base de datos: ${this.ODOO_DB}`);
       console.log(`👤 Usuario de prueba: ${testUser}`);

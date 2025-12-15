@@ -1,5 +1,6 @@
 import { useState, useCallback, useEffect } from 'react';
 import { useNavigate } from 'react-router-dom';
+import { getAuthToken, setAuthToken, removeAuthToken, authenticatedFetch, fetchCsrfToken } from '@/lib/api';
 
 interface User {
   uid: number;
@@ -30,13 +31,16 @@ export function useAuth() {
     error: null,
   });
 
-  const checkAuth = useCallback(() => {
+  const checkAuth = useCallback(async () => {
+    const token = getAuthToken();
     const user = localStorage.getItem('user');
-    const isAuthenticated = localStorage.getItem('isAuthenticated') === 'true';
 
-    if (user && isAuthenticated) {
+    if (token && user) {
       try {
         const parsedUser = JSON.parse(user);
+        // Verificar que el token sigue siendo válido haciendo una request al servidor
+        // Por ahora, confiamos en el token del localStorage, pero en producción
+        // deberíamos verificar con el servidor
         setAuthState({
           user: parsedUser,
           isAuthenticated: true,
@@ -47,7 +51,7 @@ export function useAuth() {
       } catch (error) {
         // Si hay error al parsear, limpiar localStorage
         localStorage.removeItem('user');
-        localStorage.removeItem('isAuthenticated');
+        removeAuthToken();
       }
     }
 
@@ -75,19 +79,30 @@ export function useAuth() {
 
       if (result.success) {
         const user = result.data;
+        const token = user.token;
         
-        // Guardar en localStorage para persistencia
-        localStorage.setItem('user', JSON.stringify(user));
-        localStorage.setItem('isAuthenticated', 'true');
+        // Guardar token JWT
+        if (token) {
+          setAuthToken(token);
+        }
+        
+        // Remover token del objeto user antes de guardarlo
+        const { token: _, ...userWithoutToken } = user;
+        
+        // Guardar usuario en localStorage
+        localStorage.setItem('user', JSON.stringify(userWithoutToken));
+
+        // Obtener token CSRF
+        await fetchCsrfToken();
 
         setAuthState({
-          user,
+          user: userWithoutToken,
           isAuthenticated: true,
           isLoading: false,
           error: null,
         });
 
-        return { success: true, user };
+        return { success: true, user: userWithoutToken };
       } else {
         setAuthState(prev => ({
           ...prev,
@@ -109,12 +124,12 @@ export function useAuth() {
 
   const logout = useCallback(async () => {
     try {
-      // Llamar al endpoint de logout del servidor
-      await fetch('/api/auth/logout', {
+      // Obtener token CSRF antes de hacer logout
+      const csrfToken = localStorage.getItem('csrfToken');
+      
+      // Llamar al endpoint de logout del servidor con autenticación
+      await authenticatedFetch('/api/auth/logout', {
         method: 'POST',
-        headers: {
-          'Content-Type': 'application/json',
-        },
       });
     } catch (error) {
       console.error('Error al cerrar sesión en el servidor:', error);
@@ -123,7 +138,8 @@ export function useAuth() {
 
     // Limpiar datos locales
     localStorage.removeItem('user');
-    localStorage.removeItem('isAuthenticated');
+    removeAuthToken();
+    localStorage.removeItem('csrfToken');
     setAuthState({
       user: null,
       isAuthenticated: false,

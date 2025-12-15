@@ -1,31 +1,46 @@
 import "dotenv/config";
 import express, { type Request, Response, NextFunction } from "express";
+import helmet from "helmet";
 import { registerRoutes } from "./routes";
 import { setupVite, serveStatic, log } from "./vite";
 
 const app = express();
 
-// Set security headers including CSP
-app.use((req, res, next) => {
-  // Content Security Policy that allows necessary resources
-  res.setHeader(
-    "Content-Security-Policy",
-    "default-src 'self'; " +
-    "script-src 'self' 'unsafe-inline' 'wasm-unsafe-eval'; " +
-    "style-src 'self' 'unsafe-inline' https://fonts.googleapis.com; " +
-    "style-src-attr 'unsafe-inline'; " +
-    "font-src 'self' https://fonts.gstatic.com; " +
-    "connect-src 'self' http://localhost:3001 localhost:3001; " +
-    "img-src 'self' data: https:; " +
-    "object-src 'none'; " +
-    "base-uri 'self'; " +
-    "frame-ancestors 'none'"
-  );
-  res.setHeader("X-Content-Type-Options", "nosniff");
-  res.setHeader("X-Frame-Options", "DENY");
-  res.setHeader("X-XSS-Protection", "1; mode=block");
-  next();
-});
+// Configure Helmet for security headers
+// Note: In development, we need to allow unsafe-inline for Vite HMR
+// In production, this should be stricter with nonces
+const isDevelopment = app.get("env") === "development";
+
+app.use(
+  helmet({
+    contentSecurityPolicy: {
+      directives: {
+        defaultSrc: ["'self'"],
+        scriptSrc: isDevelopment
+          ? ["'self'", "'unsafe-inline'", "'unsafe-eval'", "http://localhost:3001"] // Vite HMR needs unsafe-eval in dev
+          : ["'self'"], // Production: use nonces for inline scripts
+        styleSrc: isDevelopment
+          ? ["'self'", "'unsafe-inline'", "https://fonts.googleapis.com"]
+          : ["'self'", "https://fonts.googleapis.com"], // Production: move inline styles to CSS files
+        styleSrcAttr: isDevelopment ? ["'unsafe-inline'"] : [], // Production: avoid inline styles
+        fontSrc: ["'self'", "https://fonts.gstatic.com"],
+        connectSrc: ["'self'", isDevelopment ? "http://localhost:3001" : ""].filter(Boolean),
+        imgSrc: ["'self'", "data:", "https:"],
+        objectSrc: ["'none'"],
+        baseUri: ["'self'"],
+        frameAncestors: ["'none'"],
+        formAction: ["'self'"],
+        upgradeInsecureRequests: !isDevelopment ? [] : null, // Only in production
+      },
+    },
+    crossOriginEmbedderPolicy: false, // Disable for Vite compatibility
+    hsts: {
+      maxAge: 31536000, // 1 year
+      includeSubDomains: true,
+      preload: true,
+    },
+  })
+);
 
 app.use(express.json());
 app.use(express.urlencoded({ extended: false }));

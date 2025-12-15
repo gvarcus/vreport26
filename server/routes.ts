@@ -1,7 +1,13 @@
-import type { Express } from "express";
+import type { Express, Request, Response } from "express";
 import { createServer, type Server } from "http";
 import { storage } from "./storage";
 import { OdooService } from "./lib/odooService";
+import { authenticate } from "./middleware/auth.js";
+import { loginRateLimiter, reportsRateLimiter, generalRateLimiter } from "./middleware/rateLimit.js";
+import { validateLogin, validateDateRange, validatePagination, combineValidators } from "./middleware/validation.js";
+import { generateToken } from "./utils/jwt.js";
+import { csrfToken, validateCsrf } from "./middleware/csrf.js";
+import { logLoginSuccess, logLoginFailure } from "./utils/securityLogger.js";
 
 export async function registerRoutes(app: Express): Promise<Server> {
   // put application routes here
@@ -9,6 +15,17 @@ export async function registerRoutes(app: Express): Promise<Server> {
 
   // use storage to perform CRUD operations on the storage interface
   // e.g. storage.insertUser(user) or storage.getUserByUsername(username)
+
+  // Aplicar middleware CSRF a todas las rutas
+  app.use(csrfToken);
+
+  // Endpoint para obtener token CSRF (útil para el cliente)
+  app.get('/api/csrf-token', (req, res) => {
+    res.json({
+      success: true,
+      csrfToken: res.locals.csrfToken,
+    });
+  });
 
   // 🔗 Rutas de prueba de Odoo
   app.post('/api/test-odoo', async (req, res) => {
@@ -72,16 +89,11 @@ export async function registerRoutes(app: Express): Promise<Server> {
   // y NO se expone a través de endpoints HTTP.
 
   // 🔐 Autenticación con Odoo
-  app.post('/api/auth/login', async (req, res) => {
+  // Rate limiting: 5 intentos por IP cada 15 minutos
+  // CSRF: No requerido para login (es el punto de entrada)
+  app.post('/api/auth/login', loginRateLimiter, combineValidators(...validateLogin), async (req: Request, res: Response) => {
     try {
       const { login, password } = req.body;
-      
-      if (!login || !password) {
-        return res.status(400).json({
-          success: false,
-          message: 'Login y password son requeridos',
-        });
-      }
 
       const config = OdooService.getConfig();
       console.log(`🔐 Intentando autenticación:`);
@@ -92,6 +104,16 @@ export async function registerRoutes(app: Express): Promise<Server> {
       const authResult = await OdooService.authenticate(login, password);
       
       console.log(`✅ Autenticación exitosa para: ${authResult.name} (UID: ${authResult.uid})`);
+      
+      // Generar token JWT
+      const token = generateToken({
+        uid: authResult.uid,
+        username: authResult.username,
+        name: authResult.name,
+      });
+      
+      // Registrar login exitoso
+      logLoginSuccess(req, authResult.uid, authResult.username);
       
       res.json({
         success: true,
@@ -107,6 +129,7 @@ export async function registerRoutes(app: Express): Promise<Server> {
           db: authResult.db,
           is_admin: authResult.is_admin,
           is_system: authResult.is_system,
+          token, // Incluir token JWT en la respuesta
         },
       });
     } catch (error) {
@@ -118,6 +141,7 @@ export async function registerRoutes(app: Express): Promise<Server> {
       // Proporcionar mensaje de error más detallado
       let errorMessage = 'Error de autenticación';
       let errorDetails = '';
+      let reason = 'unknown_error';
       
       if (error instanceof Error) {
         errorMessage = error.message;
@@ -126,12 +150,18 @@ export async function registerRoutes(app: Express): Promise<Server> {
         // Mensajes más específicos según el tipo de error
         if (error.message.includes('HTTP error')) {
           errorMessage = `No se pudo conectar con el servidor Odoo en ${config.odooUrl}. Verifica la URL y la conectividad de red.`;
+          reason = 'connection_error';
         } else if (error.message.includes('Invalid credentials') || error.message.includes('Wrong login')) {
           errorMessage = 'Credenciales inválidas. Verifica tu usuario y contraseña.';
+          reason = 'invalid_credentials';
         } else if (error.message.includes('Database')) {
           errorMessage = `Error con la base de datos "${config.odooDb}". Verifica que el nombre de la base de datos sea correcto.`;
+          reason = 'database_error';
         }
       }
+      
+      // Registrar intento de login fallido
+      logLoginFailure(req, req.body.login, reason);
       
       res.status(401).json({
         success: false,
@@ -146,7 +176,9 @@ export async function registerRoutes(app: Express): Promise<Server> {
   });
 
   // 🚪 Logout - Cerrar sesión
-  app.post('/api/auth/logout', async (req, res) => {
+  // Requiere autenticación para cerrar sesión
+  // CSRF: Protegido con autenticación JWT (menos crítico pero buena práctica)
+  app.post('/api/auth/logout', authenticate, validateCsrf, async (req, res) => {
     try {
       console.log(`🚪 Cerrando sesión...`);
       
@@ -171,16 +203,10 @@ export async function registerRoutes(app: Express): Promise<Server> {
   });
 
   // 📊 Informe de pagos diarios para ventas
-  app.post('/api/reports/daily-payments', async (req, res) => {
+  // Protegido con autenticación, rate limiting y CSRF
+  app.post('/api/reports/daily-payments', authenticate, validateCsrf, reportsRateLimiter, combineValidators(...validateDateRange), async (req: Request, res: Response) => {
     try {
       const { dateFrom, dateTo, estadoRep } = req.body;
-      
-      if (!dateFrom || !dateTo) {
-        return res.status(400).json({
-          success: false,
-          message: 'dateFrom y dateTo son requeridos',
-        });
-      }
 
       console.log(`📊 Generando informe de pagos diarios desde ${dateFrom} hasta ${dateTo}`);
       if (estadoRep) {
@@ -234,16 +260,10 @@ export async function registerRoutes(app: Express): Promise<Server> {
   });
 
   // 📋 Tabla de pagos con paginación
-  app.post('/api/reports/payment-table', async (req, res) => {
+  // Protegido con autenticación, rate limiting y CSRF
+  app.post('/api/reports/payment-table', authenticate, validateCsrf, reportsRateLimiter, combineValidators(...validateDateRange, ...validatePagination), async (req: Request, res: Response) => {
     try {
       const { dateFrom, dateTo, estadoRep, page = 1, pageSize = 10 } = req.body;
-      
-      if (!dateFrom || !dateTo) {
-        return res.status(400).json({
-          success: false,
-          message: 'dateFrom y dateTo son requeridos',
-        });
-      }
 
       console.log(`📋 Obteniendo tabla de pagos - Página ${page}, Tamaño ${pageSize}`);
       if (estadoRep) {
@@ -298,16 +318,10 @@ export async function registerRoutes(app: Express): Promise<Server> {
   });
 
   // 📄 Ruta para obtener datos de facturas con paginación
-  app.post('/api/reports/invoices', async (req, res) => {
+  // Protegido con autenticación, rate limiting y CSRF
+  app.post('/api/reports/invoices', authenticate, validateCsrf, reportsRateLimiter, combineValidators(...validateDateRange, ...validatePagination), async (req: Request, res: Response) => {
     try {
       const { dateFrom, dateTo, state, page = 1, pageSize = 10 } = req.body;
-      
-      if (!dateFrom || !dateTo) {
-        return res.status(400).json({
-          success: false,
-          message: 'dateFrom y dateTo son requeridos',
-        });
-      }
 
       console.log(`📄 Obteniendo datos de facturas - Página ${page}, Tamaño ${pageSize}`);
       if (state) {
@@ -507,16 +521,10 @@ export async function registerRoutes(app: Express): Promise<Server> {
   });
 
   // 📋 Ruta para obtener datos de cotizaciones con paginación
-  app.post('/api/reports/quotations', async (req, res) => {
+  // Protegido con autenticación, rate limiting y CSRF
+  app.post('/api/reports/quotations', authenticate, validateCsrf, reportsRateLimiter, combineValidators(...validateDateRange, ...validatePagination), async (req: Request, res: Response) => {
     try {
       const { dateFrom, dateTo, state, page = 1, pageSize = 10 } = req.body;
-      
-      if (!dateFrom || !dateTo) {
-        return res.status(400).json({
-          success: false,
-          message: 'dateFrom y dateTo son requeridos',
-        });
-      }
 
       console.log(`📋 Obteniendo datos de cotizaciones - Página ${page}, Tamaño ${pageSize}`);
       if (state) {
@@ -658,16 +666,10 @@ export async function registerRoutes(app: Express): Promise<Server> {
   });
 
   // 📊 Ruta para obtener estadísticas de cotizaciones
-  app.post('/api/reports/quotations/stats', async (req, res) => {
+  // Protegido con autenticación, rate limiting y CSRF
+  app.post('/api/reports/quotations/stats', authenticate, validateCsrf, reportsRateLimiter, combineValidators(...validateDateRange), async (req: Request, res: Response) => {
     try {
       const { dateFrom, dateTo, state } = req.body;
-      
-      if (!dateFrom || !dateTo) {
-        return res.status(400).json({
-          success: false,
-          message: 'dateFrom y dateTo son requeridos',
-        });
-      }
 
       console.log(`📊 Generando estadísticas de cotizaciones desde ${dateFrom} hasta ${dateTo}`);
       
