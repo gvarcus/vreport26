@@ -1,4 +1,4 @@
-import rateLimit from 'express-rate-limit';
+import rateLimit, { ipKeyGenerator } from 'express-rate-limit';
 import type { Request, Response } from 'express';
 import { logRateLimitExceeded } from '../utils/securityLogger.js';
 
@@ -15,10 +15,8 @@ export const loginRateLimiter = rateLimit({
   },
   standardHeaders: true, // Retorna información de rate limit en headers `RateLimit-*`
   legacyHeaders: false, // Deshabilita headers `X-RateLimit-*`
-  // Usar IP del cliente
-  keyGenerator: (req) => {
-    return req.ip || req.socket.remoteAddress || 'unknown';
-  },
+  // Usar IP del cliente con soporte IPv6
+  keyGenerator: ipKeyGenerator,
   handler: (req: Request, res: Response) => {
     logRateLimitExceeded(req, '/api/auth/login');
     res.status(429).json({
@@ -47,7 +45,8 @@ export const reportsRateLimiter = rateLimit({
     if (user && user.uid) {
       return `user:${user.uid}`;
     }
-    return req.ip || req.socket.remoteAddress || 'unknown';
+    // Usar el helper de express-rate-limit para IPv6
+    return ipKeyGenerator(req);
   },
   handler: (req: Request, res: Response) => {
     logRateLimitExceeded(req, req.path);
@@ -71,8 +70,7 @@ export const generalRateLimiter = rateLimit({
   },
   standardHeaders: true,
   legacyHeaders: false,
-  keyGenerator: (req) => {
-    return req.ip || req.socket.remoteAddress || 'unknown';
-  },
+  // Usar el helper de express-rate-limit para IPv6
+  keyGenerator: ipKeyGenerator,
 });
 

@@ -42,7 +42,14 @@ export class OdooService {
     if (!url) {
       throw new Error('ODOO_URL must be configured in environment variables');
     }
-    return url;
+    // Normalizar URL: agregar https:// si no tiene protocolo
+    let normalizedUrl = url.trim();
+    if (!normalizedUrl.startsWith('http://') && !normalizedUrl.startsWith('https://')) {
+      normalizedUrl = `https://${normalizedUrl}`;
+    }
+    // Remover trailing slash si existe
+    normalizedUrl = normalizedUrl.replace(/\/$/, '');
+    return normalizedUrl;
   })();
 
   private static readonly ODOO_DB = (() => {
