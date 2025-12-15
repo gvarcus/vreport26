@@ -96,14 +96,25 @@ export function serveStatic(app: Express) {
   const distPath = path.resolve(import.meta.dirname, "..", "dist", "public");
 
   if (!fs.existsSync(distPath)) {
-    throw new Error(
-      `Could not find the build directory: ${distPath}, make sure to build the client first`,
-    );
+    // En Vercel, si el directorio no existe, crear una respuesta de error más amigable
+    // pero no lanzar error para evitar que la función serverless falle completamente
+    console.warn(`⚠️ Build directory not found: ${distPath}`);
+    console.warn(`⚠️ Make sure 'npm run vercel-build' runs before deployment`);
+    
+    // En lugar de lanzar error, servir un mensaje útil
+    app.use("*", (_req, res) => {
+      res.status(503).json({
+        error: "Build files not found",
+        message: "The client build directory is missing. Make sure 'vercel-build' script runs successfully.",
+        path: distPath
+      });
+    });
+    return;
   }
 
   app.use(express.static(distPath));
 
-  // fall through to index.html if the file doesn't exist
+  // fall through to index.html if the file doesn't exist (SPA routing)
   app.use("*", (_req, res) => {
     res.sendFile(path.resolve(distPath, "index.html"));
   });
