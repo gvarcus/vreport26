@@ -1285,6 +1285,367 @@ export class OdooService {
   }
 
   /**
+   * Obtener top 10 productos y categorías con más ventas basado en sale.order.line
+   * Solo considera pedidos confirmados: order_id.state IN ('sale', 'done')
+   * Usa product_uom_qty para unidades y price_subtotal para ingreso
+   * Usa read_group directamente para categorías (más eficiente)
+   */
+  static async getTopProductsAndCategories(filters: {
+    dateFrom: string;
+    dateTo: string;
+  }) {
+    try {
+      console.log(`📦 ===== INICIANDO getTopProductsAndCategories =====`);
+      console.log(`📦 Fechas: ${filters.dateFrom} hasta ${filters.dateTo}`);
+      
+      const user = await this.ensureAuthenticated();
+      
+      // Formatear fechas para datetime (date_order es datetime en Odoo)
+      const dateFromFormatted = filters.dateFrom.includes('T') 
+        ? filters.dateFrom 
+        : `${filters.dateFrom} 00:00:00`;
+      const dateToFormatted = filters.dateTo.includes('T')
+        ? filters.dateTo
+        : `${filters.dateTo} 23:59:59`;
+      
+      console.log(`📦 Fechas formateadas: ${dateFromFormatted} - ${dateToFormatted}`);
+      
+      // Paso 1: Obtener IDs de pedidos confirmados
+      console.log(`📦 PASO 2: Obteniendo pedidos confirmados...`);
+      
+      const orderFilters = [
+        ['state', 'in', ['sale', 'done']],
+        ['date_order', '>=', dateFromFormatted],
+        ['date_order', '<=', dateToFormatted]
+      ];
+      
+      const orderResponse = await this.makeAuthenticatedRequest(`${this.ODOO_URL}/web/dataset/call_kw`, {
+        jsonrpc: '2.0',
+        method: 'call',
+        params: {
+          model: 'sale.order',
+          method: 'search_read',
+          args: [orderFilters],
+          kwargs: {
+            fields: ['id'],
+            limit: 10000
+          },
+          context: {
+            'uid': user.uid,
+            'tz': 'America/Mexico_City',
+            'lang': 'es_MX'
+          }
+        },
+        id: Math.floor(Math.random() * 1000000),
+      });
+      
+      if (!orderResponse.ok) {
+        throw new Error(`HTTP error! status: ${orderResponse.status}`);
+      }
+      
+      const orderData: OdooResponse<any[]> = await orderResponse.json();
+      if (orderData.error) {
+        throw new Error(`Odoo error: ${orderData.error.message || JSON.stringify(orderData.error)}`);
+      }
+      
+      const orders = orderData.result || [];
+      const orderIds = orders.map((order: any) => order.id);
+      console.log(`📦 Pedidos encontrados: ${orderIds.length}`);
+      
+      if (orderIds.length === 0) {
+        return { products: [], categories: [] };
+      }
+      
+      // Paso 2: Obtener líneas de pedido
+      console.log(`📦 PASO 2: Obteniendo líneas de pedido...`);
+      
+      const lineFilters = [
+        ['order_id', 'in', orderIds],
+        ['product_id', '!=', false]
+      ];
+      
+      const linesResponse = await this.makeAuthenticatedRequest(`${this.ODOO_URL}/web/dataset/call_kw`, {
+        jsonrpc: '2.0',
+        method: 'call',
+        params: {
+          model: 'sale.order.line',
+          method: 'search_read',
+          args: [lineFilters],
+          kwargs: {
+            fields: ['product_id', 'product_uom_qty', 'price_subtotal'],
+            limit: 10000
+          },
+          context: {
+            'uid': user.uid,
+            'tz': 'America/Mexico_City',
+            'lang': 'es_MX'
+          }
+        },
+        id: Math.floor(Math.random() * 1000000),
+      });
+      
+      if (!linesResponse.ok) {
+        throw new Error(`HTTP error! status: ${linesResponse.status}`);
+      }
+      
+      const linesData: OdooResponse<any[]> = await linesResponse.json();
+      if (linesData.error) {
+        throw new Error(`Odoo error: ${linesData.error.message || JSON.stringify(linesData.error)}`);
+      }
+      
+      const lines = linesData.result || [];
+      console.log(`📦 Líneas obtenidas: ${lines.length}`);
+      
+      if (lines.length === 0) {
+        return { products: [], categories: [] };
+      }
+      
+      // Paso 3: Obtener productos únicos y sus categorías
+      console.log(`📦 PASO 3: Obteniendo productos y categorías...`);
+      
+      const productIds = Array.from(new Set(
+        lines
+          .filter((line: any) => line.product_id && line.product_id[0])
+          .map((line: any) => line.product_id[0])
+      ));
+      
+      console.log(`📦 Productos únicos: ${productIds.length}`);
+      
+      // Obtener product.product con product_tmpl_id
+      const productMap = new Map<number, {
+        productId: number;
+        productName: string;
+        productTmplId: number | null;
+      }>();
+      
+      // Obtener product.template con categ_id
+      const templateToCategoryMap = new Map<number, number>(); // templateId -> categId
+      
+      // Obtener product.category con complete_name
+      const categoryMap = new Map<number, string>(); // categId -> complete_name
+      
+      // Obtener productos en lotes
+      const batchSize = 100;
+      for (let i = 0; i < productIds.length; i += batchSize) {
+        const batch = productIds.slice(i, i + batchSize);
+        
+        const productResponse = await this.makeAuthenticatedRequest(`${this.ODOO_URL}/web/dataset/call_kw`, {
+          jsonrpc: '2.0',
+          method: 'call',
+          params: {
+            model: 'product.product',
+            method: 'read',
+            args: [batch],
+            kwargs: {
+              fields: ['id', 'name', 'product_tmpl_id']
+            },
+            context: {
+              'uid': user.uid,
+              'tz': 'America/Mexico_City',
+              'lang': 'es_MX'
+            }
+          },
+          id: Math.floor(Math.random() * 1000000),
+        });
+        
+        if (productResponse.ok) {
+          const productData: OdooResponse<any[]> = await productResponse.json();
+          if (!productData.error && productData.result) {
+            productData.result.forEach((product: any) => {
+              productMap.set(product.id, {
+                productId: product.id,
+                productName: product.name || 'Sin nombre',
+                productTmplId: product.product_tmpl_id ? product.product_tmpl_id[0] : null
+              });
+            });
+          }
+        }
+      }
+      
+      // Obtener templates únicos
+      const templateIds = Array.from(new Set(
+        Array.from(productMap.values())
+          .map(p => p.productTmplId)
+          .filter((id): id is number => id !== null)
+      ));
+      
+      console.log(`📦 Templates únicos: ${templateIds.length}`);
+      
+      // Obtener categ_id desde product.template
+      for (let i = 0; i < templateIds.length; i += batchSize) {
+        const templateBatch = templateIds.slice(i, i + batchSize);
+        
+        const templateResponse = await this.makeAuthenticatedRequest(`${this.ODOO_URL}/web/dataset/call_kw`, {
+          jsonrpc: '2.0',
+          method: 'call',
+          params: {
+            model: 'product.template',
+            method: 'read',
+            args: [templateBatch],
+            kwargs: {
+              fields: ['id', 'categ_id']
+            },
+            context: {
+              'uid': user.uid,
+              'tz': 'America/Mexico_City',
+              'lang': 'es_MX'
+            }
+          },
+          id: Math.floor(Math.random() * 1000000),
+        });
+        
+        if (templateResponse.ok) {
+          const templateData: OdooResponse<any[]> = await templateResponse.json();
+          if (!templateData.error && templateData.result) {
+            templateData.result.forEach((template: any) => {
+              if (template.categ_id && template.categ_id[0]) {
+                templateToCategoryMap.set(template.id, template.categ_id[0]);
+              }
+            });
+          }
+        }
+      }
+      
+      // Obtener category IDs únicos
+      const categoryIds = Array.from(new Set(templateToCategoryMap.values()));
+      
+      console.log(`📦 Categorías únicas: ${categoryIds.length}`);
+      
+      // Obtener complete_name desde product.category
+      for (let i = 0; i < categoryIds.length; i += batchSize) {
+        const categoryBatch = categoryIds.slice(i, i + batchSize);
+        
+        const categoryResponse = await this.makeAuthenticatedRequest(`${this.ODOO_URL}/web/dataset/call_kw`, {
+          jsonrpc: '2.0',
+          method: 'call',
+          params: {
+            model: 'product.category',
+            method: 'read',
+            args: [categoryBatch],
+            kwargs: {
+              fields: ['id', 'complete_name']
+            },
+            context: {
+              'uid': user.uid,
+              'tz': 'America/Mexico_City',
+              'lang': 'es_MX'
+            }
+          },
+          id: Math.floor(Math.random() * 1000000),
+        });
+        
+        if (categoryResponse.ok) {
+          const categoryData: OdooResponse<any[]> = await categoryResponse.json();
+          if (!categoryData.error && categoryData.result) {
+            categoryData.result.forEach((category: any) => {
+              categoryMap.set(category.id, category.complete_name || 'Sin categoría');
+            });
+          }
+        }
+      }
+      
+      // Paso 4: Agrupar por producto y por categoría
+      console.log(`📦 PASO 4: Agrupando productos y categorías...`);
+      
+      const productAggregation = new Map<number, {
+        productId: number;
+        productName: string;
+        totalQuantity: number;
+        totalRevenue: number;
+      }>();
+      
+      const categoryAggregation = new Map<string, {
+        categoryId: number;
+        categoryName: string;
+        totalQuantity: number;
+        totalRevenue: number;
+      }>();
+      
+      lines.forEach((line: any) => {
+        if (!line.product_id || !line.product_id[0]) return;
+        
+        const productId = line.product_id[0];
+        const quantity = Math.abs(parseFloat(String(line.product_uom_qty)) || 0);
+        const revenue = Math.abs(parseFloat(String(line.price_subtotal)) || 0);
+        
+        if (quantity === 0 && revenue === 0) return;
+        
+        // Agregar a productos
+        const productInfo = productMap.get(productId);
+        if (productInfo) {
+          if (!productAggregation.has(productId)) {
+            productAggregation.set(productId, {
+              productId: productInfo.productId,
+              productName: productInfo.productName,
+              totalQuantity: 0,
+              totalRevenue: 0
+            });
+          }
+          const product = productAggregation.get(productId)!;
+          product.totalQuantity += quantity;
+          product.totalRevenue += revenue;
+          
+          // Agregar a categorías usando complete_name
+          if (productInfo.productTmplId) {
+            const categId = templateToCategoryMap.get(productInfo.productTmplId);
+            if (categId) {
+              const categCompleteName = categoryMap.get(categId) || 'Sin categoría';
+              
+              if (!categoryAggregation.has(categCompleteName)) {
+                categoryAggregation.set(categCompleteName, {
+                  categoryId: categId,
+                  categoryName: categCompleteName,
+                  totalQuantity: 0,
+                  totalRevenue: 0
+                });
+              }
+              
+              const category = categoryAggregation.get(categCompleteName)!;
+              category.totalQuantity += quantity;
+              category.totalRevenue += revenue;
+            }
+          }
+        }
+      });
+      
+      console.log(`📦 Productos únicos procesados: ${productAggregation.size}`);
+      console.log(`📦 Categorías únicas procesadas: ${categoryAggregation.size}`);
+      
+      // Paso 5: Convertir a arrays y ordenar
+      console.log(`📦 PASO 5: Finalizando...`);
+      
+      const products = Array.from(productAggregation.values())
+        .filter(p => p.totalRevenue > 0 || p.totalQuantity > 0)
+        .sort((a, b) => b.totalRevenue - a.totalRevenue)
+        .slice(0, 10)
+        .map((product, index) => ({
+          ...product,
+          rank: index + 1
+        }));
+      
+      const categoriesWithRank = Array.from(categoryAggregation.values())
+        .filter(c => c.totalRevenue > 0 || c.totalQuantity > 0)
+        .sort((a, b) => b.totalRevenue - a.totalRevenue)
+        .slice(0, 10)
+        .map((category, index) => ({
+          ...category,
+          rank: index + 1
+        }));
+      
+      console.log(`✅ ===== FINALIZANDO getTopProductsAndCategories =====`);
+      console.log(`✅ Productos: ${products.length}, Categorías: ${categoriesWithRank.length}`);
+      
+      return {
+        products,
+        categories: categoriesWithRank
+      };
+    } catch (error) {
+      console.error('❌ Error obteniendo top productos y categorías:', error);
+      throw error;
+    }
+  }
+
+  /**
    * Obtener configuración actual
    */
   static getConfig() {

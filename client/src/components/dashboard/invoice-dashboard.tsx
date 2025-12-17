@@ -8,6 +8,7 @@ import { Badge } from "@/components/ui/badge";
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/components/ui/table";
 import { InvoiceComparison } from "./invoice-comparison";
 import { TopPerformers } from "./top-performers";
+import { TopProductsCategories } from "./top-products-categories";
 import { authenticatedFetch } from "@/lib/api";
 import { 
   FileText, 
@@ -618,6 +619,11 @@ export default function InvoiceDashboard() {
             <TopPerformers invoices={stats.invoices} />
           </CardContent>
         </Card>
+      )}
+
+      {/* Top Productos y Categorías */}
+      {stats && dateFrom && dateTo && (
+        <TopProductsCategories dateFrom={dateFrom} dateTo={dateTo} shouldFetch={!!stats} />
       )}
 
       {/* Tabla de Facturas */}

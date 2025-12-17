@@ -717,6 +717,57 @@ export async function registerRoutes(app: Express): Promise<Server> {
     }
   });
 
+  // 📦 Ruta para obtener top 10 productos y categorías con más ventas
+  // Basado en sale.order.line - Solo pedidos confirmados (state IN ('sale', 'done'))
+  app.post('/api/reports/top-products-categories', authenticate, validateCsrf, reportsRateLimiter, combineValidators(...validateDateRange), async (req: Request, res: Response) => {
+    try {
+      const { dateFrom, dateTo } = req.body;
+
+      console.log(`📦 Generando top productos y categorías desde ${dateFrom} hasta ${dateTo}`);
+      
+      const topData = await OdooService.getTopProductsAndCategories({
+        dateFrom,
+        dateTo
+      });
+      
+      console.log(`✅ Top productos y categorías generados: ${topData.products.length} productos, ${topData.categories.length} categorías`);
+      
+      res.json({
+        success: true,
+        message: 'Top productos y categorías obtenidos exitosamente',
+        data: topData,
+        timestamp: new Date().toISOString(),
+      });
+    } catch (error) {
+      console.error('💥 Error generando top productos y categorías:', error);
+      
+      let errorMessage = 'Error interno del servidor';
+      let errorDetails = '';
+      
+      if (error instanceof Error) {
+        errorMessage = error.message;
+        errorDetails = error.stack || '';
+      } else if (typeof error === 'string') {
+        errorMessage = error;
+      }
+      
+      if (errorMessage.includes('fetch') || errorMessage.includes('network') || errorMessage.includes('ECONNREFUSED')) {
+        errorMessage = 'Error de conexión con el servidor Odoo. Verifique la configuración.';
+      } else if (errorMessage.includes('authentication') || errorMessage.includes('401')) {
+        errorMessage = 'Error de autenticación con Odoo. Verifique las credenciales.';
+      } else if (errorMessage.includes('permission') || errorMessage.includes('403')) {
+        errorMessage = 'Sin permisos para acceder a los datos de productos y categorías.';
+      }
+      
+      res.status(500).json({
+        success: false,
+        message: errorMessage,
+        error: process.env.NODE_ENV === 'development' ? errorDetails : undefined,
+        timestamp: new Date().toISOString(),
+      });
+    }
+  });
+
   const httpServer = createServer(app);
 
   return httpServer;

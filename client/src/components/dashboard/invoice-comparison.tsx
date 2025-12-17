@@ -275,7 +275,7 @@ export function InvoiceComparison({
             {/* Gráfico de Pie */}
             <div>
               <h4 className="font-semibold text-gray-900 mb-3">Distribución por Monto</h4>
-              <div className="h-64">
+              <div className="h-80">
                 <ResponsiveContainer width="100%" height="100%">
                   <PieChart>
                     <Pie
@@ -283,8 +283,11 @@ export function InvoiceComparison({
                       cx="50%"
                       cy="50%"
                       labelLine={false}
-                      label={({ name, percent }) => `${name}: ${(percent * 100).toFixed(1)}%`}
-                      outerRadius={80}
+                      label={({ name, value, percent }) => {
+                        const percentage = (percent * 100).toFixed(1);
+                        return `${name}\n${formatCurrency(value)}\n${percentage}%`;
+                      }}
+                      outerRadius={100}
                       fill="#8884d8"
                       dataKey="value"
                     >
@@ -293,11 +296,51 @@ export function InvoiceComparison({
                       ))}
                     </Pie>
                     <Tooltip 
-                      formatter={(value: number) => [formatCurrency(value), 'Monto']}
+                      formatter={(value: number, name: string, props: any) => {
+                        const percent = props.payload.percent * 100;
+                        return [
+                          `${formatCurrency(value)} (${percent.toFixed(2)}%)`,
+                          'Monto'
+                        ];
+                      }}
+                      contentStyle={{
+                        backgroundColor: 'white',
+                        border: '1px solid #e5e7eb',
+                        borderRadius: '8px',
+                        padding: '8px'
+                      }}
                     />
-                    <Legend />
+                    <Legend 
+                      formatter={(value, entry: any) => {
+                        const data = pieData.find(d => d.name === value);
+                        if (data) {
+                          return `${value}: ${formatCurrency(data.value)}`;
+                        }
+                        return value;
+                      }}
+                    />
                   </PieChart>
                 </ResponsiveContainer>
+              </div>
+              {/* Resumen numérico debajo del gráfico */}
+              <div className="mt-4 space-y-2">
+                {pieData.map((item, index) => (
+                  <div key={index} className="flex items-center justify-between p-2 bg-gray-50 rounded">
+                    <div className="flex items-center gap-2">
+                      <div 
+                        className="w-4 h-4 rounded"
+                        style={{ backgroundColor: COLORS[index % COLORS.length] }}
+                      />
+                      <span className="text-sm font-medium text-gray-700">{item.name}</span>
+                    </div>
+                    <div className="text-right">
+                      <div className="text-sm font-bold text-gray-900">{formatCurrency(item.value)}</div>
+                      <div className="text-xs text-gray-500">
+                        {totalAmount > 0 ? ((item.value / totalAmount) * 100).toFixed(2) : '0.00'}%
+                      </div>
+                    </div>
+                  </div>
+                ))}
               </div>
             </div>
 
