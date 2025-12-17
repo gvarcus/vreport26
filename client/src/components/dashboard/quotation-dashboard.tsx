@@ -7,6 +7,7 @@ import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@
 import { Badge } from "@/components/ui/badge";
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/components/ui/table";
 import { QuotationCharts } from "./quotation-charts";
+import { authenticatedFetch } from "@/lib/api";
 import { 
   FileText, 
   CheckCircle, 
@@ -154,16 +155,19 @@ export default function QuotationDashboard() {
 
     try {
       // Obtener estadísticas generales
-      const statsResponse = await fetch('/api/reports/quotations/stats', {
+      const requestBody: any = {
+        dateFrom,
+        dateTo,
+      };
+      
+      // Solo incluir state si no es "all"
+      if (state !== "all") {
+        requestBody.state = state;
+      }
+      
+      const statsResponse = await authenticatedFetch('/api/reports/quotations/stats', {
         method: 'POST',
-        headers: {
-          'Content-Type': 'application/json',
-        },
-        body: JSON.stringify({
-          dateFrom,
-          dateTo,
-          state: state === "all" ? undefined : state || undefined,
-        }),
+        body: JSON.stringify(requestBody),
       });
 
       if (!statsResponse.ok) {
@@ -209,18 +213,21 @@ export default function QuotationDashboard() {
       
       // Si no hay cotizaciones cargadas, obtenerlas del servidor
       if (quotationsToFilter.length === 0) {
-        const response = await fetch('/api/reports/quotations', {
+        const requestBody: any = {
+          dateFrom,
+          dateTo,
+          page: 1,
+          pageSize: 100 // Máximo permitido por el validador
+        };
+        
+        // Solo incluir state si no es "all"
+        if (state !== "all") {
+          requestBody.state = state;
+        }
+        
+        const response = await authenticatedFetch('/api/reports/quotations', {
           method: 'POST',
-          headers: {
-            'Content-Type': 'application/json',
-          },
-          body: JSON.stringify({
-            dateFrom,
-            dateTo,
-            state: state === "all" ? undefined : state || undefined,
-            page: 1,
-            pageSize: 1000 // Obtener todas para aplicar filtros locales
-          }),
+          body: JSON.stringify(requestBody),
         });
 
         if (!response.ok) {

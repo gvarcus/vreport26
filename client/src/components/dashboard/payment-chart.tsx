@@ -11,6 +11,7 @@ import { Loader2, Calendar, TrendingUp, DollarSign, FileText, AlertCircle, BookO
 import { LineChart, Line, XAxis, YAxis, CartesianGrid, Tooltip, Legend, ResponsiveContainer, BarChart, Bar } from 'recharts';
 import { format, parseISO, subDays } from 'date-fns';
 import { es } from 'date-fns/locale';
+import { authenticatedFetch } from '@/lib/api';
 
 interface PaymentData {
   date: string;
@@ -100,16 +101,19 @@ export function PaymentChart({ onDataLoad }: PaymentChartProps) {
     setError(null);
     
     try {
-      const response = await fetch('/api/reports/daily-payments', {
+      const requestBody: any = {
+        dateFrom,
+        dateTo,
+      };
+      
+      // Solo incluir estadoRep si no es "all"
+      if (estadoRep !== 'all') {
+        requestBody.estadoRep = estadoRep;
+      }
+      
+      const response = await authenticatedFetch('/api/reports/daily-payments', {
         method: 'POST',
-        headers: {
-          'Content-Type': 'application/json',
-        },
-        body: JSON.stringify({
-          dateFrom,
-          dateTo,
-          estadoRep: estadoRep === 'all' ? undefined : estadoRep,
-        }),
+        body: JSON.stringify(requestBody),
       });
 
       const result = await response.json();
@@ -133,18 +137,21 @@ export function PaymentChart({ onDataLoad }: PaymentChartProps) {
     setIsLoadingTable(true);
     
     try {
-      const response = await fetch('/api/reports/payment-table', {
+      const requestBody: any = {
+        dateFrom,
+        dateTo,
+        page,
+        pageSize: size,
+      };
+      
+      // Solo incluir estadoRep si no es "all"
+      if (estadoRep !== 'all') {
+        requestBody.estadoRep = estadoRep;
+      }
+      
+      const response = await authenticatedFetch('/api/reports/payment-table', {
         method: 'POST',
-        headers: {
-          'Content-Type': 'application/json',
-        },
-        body: JSON.stringify({
-          dateFrom,
-          dateTo,
-          estadoRep: estadoRep === 'all' ? undefined : estadoRep,
-          page,
-          pageSize: size,
-        }),
+        body: JSON.stringify(requestBody),
       });
 
       const result = await response.json();

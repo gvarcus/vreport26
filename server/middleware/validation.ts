@@ -25,13 +25,33 @@ export const validateDateRange = [
   body('dateFrom')
     .notEmpty()
     .withMessage('El campo dateFrom es requerido')
-    .isISO8601()
-    .withMessage('dateFrom debe ser una fecha válida en formato ISO8601'),
+    .custom((value) => {
+      // Aceptar formato YYYY-MM-DD o ISO8601 completo
+      const dateRegex = /^\d{4}-\d{2}-\d{2}(T\d{2}:\d{2}:\d{2}(\.\d{3})?Z?)?$/;
+      if (!dateRegex.test(value)) {
+        throw new Error('dateFrom debe ser una fecha válida en formato YYYY-MM-DD o ISO8601');
+      }
+      const date = new Date(value);
+      if (isNaN(date.getTime())) {
+        throw new Error('dateFrom debe ser una fecha válida');
+      }
+      return true;
+    }),
   body('dateTo')
     .notEmpty()
     .withMessage('El campo dateTo es requerido')
-    .isISO8601()
-    .withMessage('dateTo debe ser una fecha válida en formato ISO8601')
+    .custom((value) => {
+      // Aceptar formato YYYY-MM-DD o ISO8601 completo
+      const dateRegex = /^\d{4}-\d{2}-\d{2}(T\d{2}:\d{2}:\d{2}(\.\d{3})?Z?)?$/;
+      if (!dateRegex.test(value)) {
+        throw new Error('dateTo debe ser una fecha válida en formato YYYY-MM-DD o ISO8601');
+      }
+      const date = new Date(value);
+      if (isNaN(date.getTime())) {
+        throw new Error('dateTo debe ser una fecha válida');
+      }
+      return true;
+    })
     .custom((value, { req }) => {
       const dateFrom = new Date(req.body.dateFrom);
       const dateTo = new Date(value);
@@ -77,4 +97,11 @@ export function handleValidationErrors(req: Request, res: Response, next: NextFu
 export function combineValidators(...validators: ValidationChain[]) {
   return [...validators, handleValidationErrors];
 }
+
+
+
+
+
+
+
 

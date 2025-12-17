@@ -8,6 +8,7 @@ import { Badge } from "@/components/ui/badge";
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/components/ui/table";
 import { InvoiceComparison } from "./invoice-comparison";
 import { TopPerformers } from "./top-performers";
+import { authenticatedFetch } from "@/lib/api";
 import { 
   FileText, 
   CheckCircle, 
@@ -208,22 +209,36 @@ export default function InvoiceDashboard() {
 
     try {
       // Obtener estadísticas generales
-      const statsResponse = await fetch('/api/reports/invoices', {
+      const requestBody: any = {
+        dateFrom,
+        dateTo,
+        page: 1,
+        pageSize: 100 // Máximo permitido por el validador
+      };
+      
+      // Solo incluir state si no es "all"
+      if (state !== "all") {
+        requestBody.state = state;
+      }
+      
+      const statsResponse = await authenticatedFetch('/api/reports/invoices', {
         method: 'POST',
-        headers: {
-          'Content-Type': 'application/json',
-        },
-        body: JSON.stringify({
-          dateFrom,
-          dateTo,
-          state: state === "all" ? undefined : state || undefined,
-          page: 1,
-          pageSize: 1000 // Obtener todas para calcular estadísticas
-        }),
+        body: JSON.stringify(requestBody),
       });
 
       if (!statsResponse.ok) {
-        throw new Error('Error al obtener datos de facturas');
+        const errorData = await statsResponse.json().catch(() => ({}));
+        console.error('Error del servidor:', errorData);
+        
+        // Si hay errores de validación, mostrar el primer error específico
+        if (errorData.errors && Array.isArray(errorData.errors) && errorData.errors.length > 0) {
+          const firstError = errorData.errors[0];
+          const errorMessage = `${firstError.msg || firstError.message || 'Error de validación'} (${firstError.param || 'campo desconocido'})`;
+          throw new Error(errorMessage);
+        }
+        
+        const errorMessage = errorData.message || 'Error al obtener datos de facturas';
+        throw new Error(errorMessage);
       }
 
       const statsData = await statsResponse.json();
@@ -279,18 +294,21 @@ export default function InvoiceDashboard() {
       
       // Si no hay facturas cargadas, obtenerlas del servidor
       if (invoicesToFilter.length === 0) {
-        const response = await fetch('/api/reports/invoices', {
+        const requestBody: any = {
+          dateFrom,
+          dateTo,
+          page: 1,
+          pageSize: 100 // Máximo permitido por el validador
+        };
+        
+        // Solo incluir state si no es "all"
+        if (state !== "all") {
+          requestBody.state = state;
+        }
+        
+        const response = await authenticatedFetch('/api/reports/invoices', {
           method: 'POST',
-          headers: {
-            'Content-Type': 'application/json',
-          },
-          body: JSON.stringify({
-            dateFrom,
-            dateTo,
-            state: state === "all" ? undefined : state || undefined,
-            page: 1,
-            pageSize: 1000 // Obtener todas para aplicar filtros locales
-          }),
+          body: JSON.stringify(requestBody),
         });
 
         if (!response.ok) {
